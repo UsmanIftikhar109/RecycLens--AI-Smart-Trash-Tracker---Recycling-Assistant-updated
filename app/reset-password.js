@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -15,35 +15,52 @@ import { apiPost } from './utils/api';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
-  const [token, setToken] = useState('');
+  const { token } = useLocalSearchParams();
+  const [tokenInput, setTokenInput] = useState(token || '');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState(null);
   const [isError, setIsError] = useState(false);
 
-  const handleReset = async () => {
-    if (!token.trim() || !password.trim() || !confirmPassword.trim()) {
-      alert('Please fill all fields');
+  const handleResetPassword = async () => {
+    if (!tokenInput.trim()) {
+      alert('Please enter the reset token');
       return;
     }
+
+    if (!password.trim()) {
+      alert('Please enter a new password');
+      return;
+    }
+
     if (password !== confirmPassword) {
       alert('Passwords do not match');
       return;
     }
 
+    if (password.length < 6) {
+      alert('Password must be at least 6 characters');
+      return;
+    }
+
     setIsSubmitting(true);
     setMessage(null);
+    setIsError(false);
+
     try {
-      await apiPost('/api/auth/reset-password', {
-        token: token.trim(),
-        newPassword: password,
+      const response = await apiPost('/api/auth/reset-password', {
+        token: tokenInput.trim(),
+        password,
       });
+
       setIsError(false);
-      setMessage('Password reset successfully! Please login.');
+      setMessage(response.message || 'Password successfully reset!');
+
+      // Navigate to login after success
       setTimeout(() => {
-        router.replace('/');
-      }, 2000);
+        router.replace('/index');
+      }, 1500);
     } catch (error) {
       setIsError(true);
       setMessage(error.message || 'Unable to reset password');
@@ -66,42 +83,45 @@ export default function ResetPasswordScreen() {
           />
           <Text style={styles.title}>Reset Password</Text>
           <Text style={styles.subtitle}>
-            Enter the token from your email and your new password
+            Enter your reset token and new password
           </Text>
         </View>
 
         <View style={styles.form}>
           <TextInput
             style={styles.input}
-            placeholder="Reset Token"
+            placeholder="Reset token"
             placeholderTextColor="#888"
-            value={token}
-            onChangeText={setToken}
+            value={tokenInput}
+            onChangeText={setTokenInput}
             autoCapitalize="none"
             autoCorrect={false}
+            editable={!isSubmitting}
           />
 
           <TextInput
             style={styles.input}
-            placeholder="New Password"
+            placeholder="New password"
             placeholderTextColor="#888"
             value={password}
             onChangeText={setPassword}
             secureTextEntry
+            editable={!isSubmitting}
           />
 
           <TextInput
             style={styles.input}
-            placeholder="Confirm New Password"
+            placeholder="Confirm password"
             placeholderTextColor="#888"
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry
+            editable={!isSubmitting}
           />
 
           <TouchableOpacity
             style={[styles.primaryButton, isSubmitting && styles.primaryButtonDisabled]}
-            onPress={handleReset}
+            onPress={handleResetPassword}
             disabled={isSubmitting}
           >
             {isSubmitting ? (
@@ -112,9 +132,11 @@ export default function ResetPasswordScreen() {
           </TouchableOpacity>
 
           {message && (
-            <Text style={[styles.message, isError ? styles.errorText : styles.successText]}>
-              {message}
-            </Text>
+            <View style={styles.messageContainer}>
+              <Text style={[styles.message, isError ? styles.errorText : styles.successText]}>
+                {message}
+              </Text>
+            </View>
           )}
         </View>
       </ScrollView>
@@ -200,9 +222,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  messageContainer: {
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
   message: {
     textAlign: 'center',
-    marginTop: 16,
     fontSize: 14,
   },
   successText: {

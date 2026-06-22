@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -16,9 +16,11 @@ import { apiPost } from './utils/api';
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
+  const [token, setToken] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState(null);
   const [isError, setIsError] = useState(false);
+  const [step, setStep] = useState(1); // Step 1: request token, Step 2: enter token & reset
 
   const handleForgot = async () => {
     if (!email.trim()) {
@@ -28,18 +30,40 @@ export default function ForgotPasswordScreen() {
 
     setIsSubmitting(true);
     setMessage(null);
+    setIsError(false);
+
     try {
-      await apiPost('/api/auth/forgot-password', {
+      const response = await apiPost('/api/auth/forgot-password', {
         email: email.trim().toLowerCase(),
       });
-      setIsError(false);
-      setMessage('Password reset email sent! Please check your inbox.');
+
+      // Development: token is returned in response
+      if (response.token) {
+        setToken(response.token);
+        setMessage(`Token created: ${response.token}`);
+        setStep(2);
+      } else {
+        setMessage('Password reset email sent! Please check your inbox.');
+        setStep(2);
+      }
     } catch (error) {
       setIsError(true);
-      setMessage(error.message || 'Unable to send reset email');
+      setMessage(error.message || 'Unable to process reset request');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleResetPassword = async () => {
+    if (!token.trim()) {
+      alert('Please enter or paste the reset token');
+      return;
+    }
+
+    router.push({
+      pathname: '/reset-password',
+      params: { token }
+    });
   };
 
   return (
@@ -56,47 +80,78 @@ export default function ForgotPasswordScreen() {
           />
           <Text style={styles.title}>Forgot Password</Text>
           <Text style={styles.subtitle}>
-            Enter your email to receive a password reset token
+            {step === 1 
+              ? 'Enter your email to receive a password reset token'
+              : 'Use the token to reset your password'}
           </Text>
         </View>
 
         <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Gmail address"
-            placeholderTextColor="#888"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+          {step === 1 ? (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="Email address"
+                placeholderTextColor="#888"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isSubmitting}
+              />
 
-          <TouchableOpacity
-            style={[styles.primaryButton, isSubmitting && styles.primaryButtonDisabled]}
-            onPress={handleForgot}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Send Reset Link</Text>
-            )}
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryButton, isSubmitting && styles.primaryButtonDisabled]}
+                onPress={handleForgot}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Send Reset Token</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="Reset token (paste here)"
+                placeholderTextColor="#888"
+                value={token}
+                onChangeText={setToken}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
 
-          {message && (
-            <Text style={[styles.message, isError ? styles.errorText : styles.successText]}>
-              {message}
-            </Text>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={handleResetPassword}
+              >
+                <Text style={styles.primaryButtonText}>Continue to Reset Password</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => {
+                  setStep(1);
+                  setEmail('');
+                  setToken('');
+                  setMessage(null);
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>Request New Token</Text>
+              </TouchableOpacity>
+            </>
           )}
 
-          {!isError && message && (
-            <TouchableOpacity
-              style={[styles.primaryButton, { marginTop: 20, backgroundColor: '#388E3C' }]}
-              onPress={() => router.push('/reset-password')}
-            >
-              <Text style={styles.primaryButtonText}>Enter Token to Reset</Text>
-            </TouchableOpacity>
+          {message && (
+            <View style={styles.messageContainer}>
+              <Text style={[styles.message, isError ? styles.errorText : styles.successText]}>
+                {message}
+              </Text>
+            </View>
           )}
         </View>
       </ScrollView>
@@ -182,9 +237,28 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  secondaryButton: {
+    backgroundColor: 'transparent',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+  },
+  secondaryButtonText: {
+    color: '#4CAF50',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  messageContainer: {
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
   message: {
     textAlign: 'center',
-    marginTop: 16,
     fontSize: 14,
   },
   successText: {
