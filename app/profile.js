@@ -1,30 +1,50 @@
-import React, { useState } from 'react';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Alert,
+    ActivityIndicator,
+    Alert,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { apiDelete, apiGet } from './utils/api';
+import { useAuth } from './utils/auth-context';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { user, logout: authLogout } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [profileData, setProfileData] = useState(null);
   const [notifications, setNotifications] = useState(true);
 
-  const user = {
-    name: 'John Doe',
-    email: 'john@example.com',
-    joined: 'April 2025',
-  };
+  // Fetch profile data
+  const fetchProfile = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await apiGet('/api/profile');
+      setProfileData(data.user);
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+    }, [fetchProfile])
+  );
+
+  const currentUser = profileData || user || {};
   const stats = {
-    totalScanned: 12,
-    recycled: 8,
-    savedCO2: '2.4 kg',
+    totalScanned: currentUser.stats?.totalScans || 0,
+    recycled: currentUser.stats?.recyclableScans || 0,
+    savedCO2: `${(currentUser.stats?.recyclableScans || 0) * 0.2} kg`,
   };
 
   const menuItems = [
@@ -51,7 +71,15 @@ export default function ProfileScreen() {
         {
           text: 'Clear',
           style: 'destructive',
-          onPress: () => alert('History cleared!'),
+          onPress: async () => {
+            try {
+              await apiDelete('/api/profile/history');
+              alert('Scan history cleared!');
+              fetchProfile();
+            } catch (error) {
+              alert('Error clearing history: ' + error.message);
+            }
+          },
         },
       ]
     );
@@ -63,7 +91,10 @@ export default function ProfileScreen() {
       {
         text: 'Log Out',
         style: 'default',
-        onPress: () => router.replace('/'),
+        onPress: async () => {
+          await authLogout();
+          router.replace('/');
+        },
       },
     ]);
   };
@@ -72,9 +103,21 @@ export default function ProfileScreen() {
     router.push('/home');
   };
 
+  const handleScan = () => {
+    router.push('/scan');
+  };
+
   const handleHistory = () => {
     router.push('/history');
   };
+
+  if (loading && !profileData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ActivityIndicator size="large" color="#4CAF50" style={{ marginTop: 50 }} />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -91,9 +134,9 @@ export default function ProfileScreen() {
             <View style={styles.avatarContainer}>
               <Text style={styles.avatar}>👤</Text>
             </View>
-            <Text style={styles.userName}>{user.name}</Text>
-            <Text style={styles.userEmail}>{user.email}</Text>
-            <Text style={styles.joinDate}>Member since {user.joined}</Text>
+            <Text style={styles.userName}>{currentUser.fullName || 'User'}</Text>
+            <Text style={styles.userEmail}>{currentUser.email}</Text>
+            <Text style={styles.joinDate}>Member since {new Date(currentUser.createdAt).toLocaleDateString()}</Text>
           </View>
 
           {/* Stats Card */}
@@ -159,7 +202,7 @@ export default function ProfileScreen() {
           </TouchableOpacity>
 
           {/* App Info */}
-          <Text style={styles.appInfo}>Trash Tracker v1.0.0\nMade with 💚 for our planet</Text>
+          <Text style={styles.appInfo}>RecycLens v1.0.0\nMade with 💚 for our planet</Text>
         </View>
       </ScrollView>
 
@@ -171,7 +214,7 @@ export default function ProfileScreen() {
           </View>
           <Text style={styles.navText}>Home</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
+        <TouchableOpacity style={styles.navItem} onPress={handleScan}>
           <View style={styles.navIconWrapper}>
             <MaterialCommunityIcons name="camera" size={24} color="#666" />
           </View>

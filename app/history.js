@@ -1,74 +1,63 @@
-import React, { useState } from 'react';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
   ScrollView,
+  StyleSheet,
+  Text,
   TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { apiGet } from './utils/api';
 
 export default function HistoryScreen() {
   const router = useRouter();
   const [filter, setFilter] = useState('All'); // All, Recyclable, Not Recyclable
   const [searchQuery, setSearchQuery] = useState('');
+  const [scanHistory, setScanHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const scanHistory = [
-    {
-      id: 1,
-      itemName: 'Plastic Bottle',
-      icon: '🥤',
-      isRecyclable: true,
-      material: 'PET Plastic',
-      date: 'Today, 2:30 PM',
-    },
-    {
-      id: 2,
-      itemName: 'Cardboard Box',
-      icon: '📦',
-      isRecyclable: true,
-      material: 'Cardboard',
-      date: 'Yesterday, 5:15 PM',
-    },
-    {
-      id: 3,
-      itemName: 'Coffee Cup',
-      icon: '☕',
-      isRecyclable: false,
-      material: 'Mixed Material',
-      date: 'Yesterday, 9:00 AM',
-    },
-    {
-      id: 4,
-      itemName: 'Glass Jar',
-      icon: '🫙',
-      isRecyclable: true,
-      material: 'Glass',
-      date: 'Apr 10, 3:45 PM',
-    },
-    {
-      id: 5,
-      itemName: 'Styrofoam Plate',
-      icon: '🍽️',
-      isRecyclable: false,
-      material: 'Styrofoam',
-      date: 'Apr 9, 7:20 PM',
-    },
-  ];
+  // Fetch scan history from API
+  const fetchHistory = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await apiGet('/api/scans');
+      setScanHistory(data.scans || []);
+    } catch (error) {
+      console.error('Error fetching history:', error);
+      setScanHistory([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchHistory();
+    }, [fetchHistory])
+  );
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredHistory = scanHistory.filter((item) => {
-    if (filter === 'Recyclable') return item.isRecyclable;
-    if (filter === 'Not Recyclable') return !item.isRecyclable;
-    return true;
+    const matchesFilter =
+      filter === 'Recyclable'
+        ? item.isRecyclable
+        : filter === 'Not Recyclable'
+        ? !item.isRecyclable
+        : true;
+    const matchesSearch =
+      !normalizedQuery ||
+      item.itemName?.toLowerCase().includes(normalizedQuery) ||
+      item.material?.toLowerCase().includes(normalizedQuery);
+    return matchesFilter && matchesSearch;
   });
 
   const handleItemPress = (item) => {
     router.push({
       pathname: '/history-detail',
-      params: { id: item.id },
+      params: { id: item._id },
     });
   };
 
@@ -77,7 +66,7 @@ export default function HistoryScreen() {
   };
 
   const handleScan = () => {
-    router.push('/scan-result');
+    router.push('/scan');
   };
 
   const handleProfile = () => {
@@ -96,6 +85,10 @@ export default function HistoryScreen() {
 
       <ScrollView style={styles.scrollView}>
         <View style={styles.content}>
+          {loading ? (
+            <ActivityIndicator size="large" color="#4CAF50" style={{ marginVertical: 40 }} />
+          ) : (
+            <>
           {/* Search Bar */}
           <View style={styles.searchContainer}>
             <Text style={styles.searchIcon}>🔍</Text>
@@ -176,9 +169,12 @@ export default function HistoryScreen() {
                   </View>
 
                   <View style={styles.cardRight}>
-                    <Text style={styles.statusIcon}>
-                      {item.isRecyclable ? '✅' : '❌'}
-                    </Text>
+                    <MaterialCommunityIcons
+                      name={item.isRecyclable ? 'check-circle' : 'close-circle'}
+                      size={22}
+                      color={item.isRecyclable ? '#4CAF50' : '#E57373'}
+                      style={styles.statusIcon}
+                    />
                     <Text
                       style={[
                         styles.statusText,
@@ -199,6 +195,8 @@ export default function HistoryScreen() {
               </View>
             )}
           </View>
+            </>
+          )}
         </View>
       </ScrollView>
 

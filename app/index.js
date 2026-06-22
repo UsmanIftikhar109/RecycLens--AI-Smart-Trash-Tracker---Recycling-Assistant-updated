@@ -1,38 +1,129 @@
-import React, { useState } from 'react';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Image,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Image,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { apiPost, getToken } from './utils/api';
+import { useAuth } from './utils/auth-context';
+
+const getErrorFromResponse = async (response) => {
+  try {
+    const json = await response.json();
+    if (json?.error) {
+      return json.error;
+    }
+  } catch {
+    // Ignore JSON parsing errors and fallback to generic status text.
+  }
+
+  return response.statusText || 'Request failed';
+};
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { login, isLoggedIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [name, setName] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
-  const handleLogin = () => {
-    if (email && password) {
-      router.replace('/home');
-    } else {
+  // Check if user is already logged in
+  useEffect(() => {
+    const checkExistingLogin = async () => {
+      const token = await getToken();
+      if (token && isLoggedIn) {
+        router.replace('/home');
+      }
+      setCheckingAuth(false);
+    };
+    checkExistingLogin();
+  }, [isLoggedIn, router]);
+
+  if (checkingAuth) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
+
+  const isGmail = (value) => /@gmail\.com$/i.test(value.trim());
+
+  const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) {
       alert('Please enter email and password');
+      return;
+    }
+    if (!isGmail(email)) {
+      alert('Please enter a valid Gmail address');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const data = await apiPost('/api/auth/login', {
+        email: email.trim().toLowerCase(),
+        password,
+      });
+
+      if (!data?.token) {
+        throw new Error('Login failed: token missing from server response');
+      }
+
+      // Store token and user data in auth context
+      await login(data.user, data.token);
+      router.replace('/home');
+    } catch (error) {
+      alert(error.message || 'Unable to login right now');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleSignUp = () => {
-    if (name && email && password && password === confirmPassword) {
+  const handleSignUp = async () => {
+    if (!name.trim() || !email.trim() || !password.trim() || !confirmPassword.trim()) {
+      alert('Please fill all fields correctly');
+      return;
+    }
+    if (!isGmail(email)) {
+      alert('Please enter a valid Gmail address');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      alert('Passwords do not match');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await apiPost('/api/auth/register', {
+        fullName: name.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+      });
+
       alert('Account created! Please login.');
       setIsSignUp(false);
-    } else {
-      alert('Please fill all fields correctly');
+      setName('');
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+    } catch (error) {
+      alert(error.message || 'Unable to create account right now');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -45,7 +136,7 @@ export default function LoginScreen() {
             style={styles.logoImage}
             resizeMode="contain"
           />
-          <Text style={styles.title}>Trash Tracker</Text>
+          <Text style={styles.title}>RecycLens</Text>
           <Text style={styles.subtitle}>
             {isSignUp ? 'Create your account' : 'Recycle smarter, every day'}
           </Text>
@@ -64,12 +155,13 @@ export default function LoginScreen() {
 
           <TextInput
             style={styles.input}
-            placeholder="Email"
+            placeholder="Gmail address"
             placeholderTextColor="#888"
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
+            autoCorrect={false}
           />
 
           <TextInput
@@ -93,23 +185,43 @@ export default function LoginScreen() {
           )}
 
           {isSignUp ? (
-            <TouchableOpacity style={styles.primaryButton} onPress={handleSignUp}>
-              <Text style={styles.primaryButtonText}>Create Account</Text>
+            <TouchableOpacity
+              style={[styles.primaryButton, isSubmitting && styles.primaryButtonDisabled]}
+              onPress={handleSignUp}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Create Account</Text>
+              )}
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={styles.primaryButton} onPress={handleLogin}>
-              <Text style={styles.primaryButtonText}>Login</Text>
+            <TouchableOpacity
+              style={[styles.primaryButton, isSubmitting && styles.primaryButtonDisabled]}
+              onPress={handleLogin}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Login</Text>
+              )}
             </TouchableOpacity>
           )}
 
           {!isSignUp && (
-            <TouchableOpacity style={styles.secondaryButton}>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => router.push('/forgot-password')}
+            >
               <Text style={styles.secondaryButtonText}>Forgot Password?</Text>
             </TouchableOpacity>
           )}
 
           <TouchableOpacity
             style={styles.switchButton}
+            disabled={isSubmitting}
             onPress={() => setIsSignUp(!isSignUp)}
           >
             <Text style={styles.switchButtonText}>
@@ -184,6 +296,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
     elevation: 2,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.7,
   },
   primaryButtonText: {
     color: '#fff',
