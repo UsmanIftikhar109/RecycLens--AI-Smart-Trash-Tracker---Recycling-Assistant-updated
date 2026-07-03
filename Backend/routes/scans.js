@@ -3,6 +3,104 @@ const router = express.Router();
 const authMiddleware = require('../middleware/authMiddleware');
 const Scan = require('../models/Scan');
 const User = require('../models/User');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+const geminiKey = process.env.GEMINI_API_KEY || '';
+const geminiClient = geminiKey ? new GoogleGenerativeAI(geminiKey) : null;
+
+const cleanJsonText = (text) => text.replace(/```json\s*|```/g, '').trim();
+
+const parseAnalysis = (text) => {
+  try {
+    return JSON.parse(cleanJsonText(text));
+  } catch {
+    return null;
+  }
+};
+
+const getFallbackAnalysis = () => ({
+  itemName: 'Unknown item',
+  material: 'Mixed material',
+  isRecyclable: false,
+  confidence: 0.5,
+  recyclingTip: 'Clean the item and check your local recycling rules before disposing of it.',
+  summary: 'Unable to identify the item with confidence.',
+  icon: '♻️',
+});
+
+/**
+ * POST /api/scans/analyze-image - Analyze an uploaded image with Gemini (protected)
+ */
+router.post('/analyze-image', authMiddleware, async (req, res) => {
+  try {
+    const { imageBase64, mimeType = 'image/jpeg' } = req.body;
+
+    if (!imageBase64) {
+      return res.status(400).json({ message: 'Image data is required' });
+    }
+
+    const fallbackAnalysis = getFallbackAnalysis();
+
+    if (!geminiClient) {
+      return res.json({
+        message: 'Gemini key is not configured',
+        analysis: fallbackAnalysis,
+      });
+    }
+
+    const model = geminiClient.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    const prompt = `Analyze this item image for RecycLens and return ONLY valid JSON with these keys:
+itemName: short item name,
+material: main material,
+isRecyclable: boolean,
+confidence: number between 0 and 1,
+recyclingTip: a concise recycling tip in 1-3 sentences,
+summary: one short sentence describing the item,
+icon: one emoji.
+
+Keep the response compact and practical.`;
+
+    const result = await model.generateContent([
+      { text: prompt },
+      {
+        inlineData: {
+          mimeType,
+          data: imageBase64,
+        },
+      },
+    ]);
+
+    const parsed = parseAnalysis(result.response.text()) || fallbackAnalysis;
+
+    res.json({
+      message: 'Image analyzed successfully',
+      analysis: {
+        itemName: parsed.itemName || fallbackAnalysis.itemName,
+        material: parsed.material || fallbackAnalysis.material,
+        isRecyclable: typeof parsed.isRecyclable === 'boolean' ? parsed.isRecyclable : fallbackAnalysis.isRecyclable,
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : fallbackAnalysis.confidence,
+        recyclingTip: parsed.recyclingTip || fallbackAnalysis.recyclingTip,
+        summary: parsed.summary || fallbackAnalysis.summary,
+        icon: parsed.icon || fallbackAnalysis.icon,
+      },
+    });
+  } catch (error) {
+    const isGeminiQuotaError = /429|quota|rate limit|too many requests/i.test(error.message || '');
+
+    if (isGeminiQuotaError) {
+      return res.json({
+        message: 'Gemini quota unavailable, using fallback recycling tip',
+        analysis: getFallbackAnalysis(),
+      });
+    }
+
+    res.status(500).json({
+      message: 'Error analyzing image',
+      error: error.message,
+    });
+  }
+});
 
 /**
  * POST /api/scans - Create a new scan (protected)
@@ -73,6 +171,40 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 /**
+ * GET /api/scans/stats/summary - Get user's scan statistics (protected)
+ */
+router.get('/stats/summary', authMiddleware, async (req, res) => {
+  try {
+    const totalScans = await Scan.countDocuments({ userId: req.userId });
+
+    const recyclableScans = await Scan.countDocuments({
+      userId: req.userId,
+      isRecyclable: true,
+    });
+
+    const byMaterial = await Scan.aggregate([
+      { $match: { userId: req.userId } },
+      { $group: { _id: '$material', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 5 },
+    ]);
+
+    res.json({
+      totalScans,
+      recyclableScans,
+      nonRecyclableScans: totalScans - recyclableScans,
+      byMaterial,
+      recyclablePercentage: totalScans > 0 ? Math.round((recyclableScans / totalScans) * 100) : 0,
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: 'Error fetching statistics',
+      error: error.message 
+    });
+  }
+});
+
+/**
  * GET /api/scans/:id - Get single scan (protected)
  */
 router.get('/:id', authMiddleware, async (req, res) => {
@@ -103,62 +235,25 @@ router.get('/:id', authMiddleware, async (req, res) => {
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const scan = await Scan.findById(req.params.id);
-    
+
     if (!scan) {
       return res.status(404).json({ message: 'Scan not found' });
     }
-    
-    // Verify ownership
+
     if (scan.userId.toString() !== req.userId) {
       return res.status(403).json({ message: 'Not authorized' });
     }
-    
+
     await Scan.findByIdAndDelete(req.params.id);
-    
-    // Decrement user's scan count
+
     await User.findByIdAndUpdate(req.userId, {
       $inc: { scansCount: -1 }
     });
-    
+
     res.json({ message: 'Scan deleted successfully' });
   } catch (error) {
     res.status(500).json({ 
       message: 'Error deleting scan',
-      error: error.message 
-    });
-  }
-});
-
-/**
- * GET /api/scans/stats - Get user's scan statistics (protected)
- */
-router.get('/stats/summary', authMiddleware, async (req, res) => {
-  try {
-    const totalScans = await Scan.countDocuments({ userId: req.userId });
-    
-    const recyclableScans = await Scan.countDocuments({ 
-      userId: req.userId,
-      isRecyclable: true 
-    });
-    
-    // Group by material
-    const byMaterial = await Scan.aggregate([
-      { $match: { userId: req.userId } },
-      { $group: { _id: '$material', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-      { $limit: 5 },
-    ]);
-    
-    res.json({
-      totalScans,
-      recyclableScans,
-      nonRecyclableScans: totalScans - recyclableScans,
-      byMaterial,
-      recyclablePercentage: totalScans > 0 ? Math.round((recyclableScans / totalScans) * 100) : 0,
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      message: 'Error fetching statistics',
       error: error.message 
     });
   }

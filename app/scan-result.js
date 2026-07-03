@@ -19,10 +19,13 @@ export default function ScanResultScreen() {
   // Get scan data from route params or use defaults
   const scanResult = {
     itemName: params.itemName || 'Plastic Bottle',
-    isRecyclable: params.isRecyclable === 'true' || true,
+    isRecyclable: params.isRecyclable === 'true',
     material: params.material || 'Plastic (PET)',
     confidence: parseFloat(params.confidence) || 0.95,
     icon: params.icon || '🥤',
+    recyclingTip: params.recyclingTip || 'Clean the item and follow your local recycling rules.',
+    summary: params.summary || '',
+    imageUri: params.imageUri || null,
   };
 
   const handleHowToRecycle = () => {
@@ -32,11 +35,8 @@ export default function ScanResultScreen() {
     });
   };
 
-  const handleAskAI = () => {
-    router.push({
-      pathname: '/ai-tips',
-      params: { itemName: scanResult.itemName },
-    });
+  const handleScanAnother = () => {
+    router.replace('/scan');
   };
 
   const handleClose = () => {
@@ -91,7 +91,14 @@ export default function ScanResultScreen() {
         <View style={styles.content}>
           {/* Item Image Placeholder */}
           <View style={styles.imageContainer}>
-            <Text style={styles.itemIcon}>{scanResult.icon}</Text>
+            {scanResult.imageUri ? (
+              <View style={styles.previewWrap}>
+                <Text style={styles.previewEmoji}>{scanResult.icon}</Text>
+                <Text style={styles.previewLabel}>Image scanned</Text>
+              </View>
+            ) : (
+              <Text style={styles.itemIcon}>{scanResult.icon}</Text>
+            )}
             <Text style={styles.itemName}>{scanResult.itemName}</Text>
           </View>
 
@@ -119,6 +126,11 @@ export default function ScanResultScreen() {
 
             <Text style={styles.infoLabel}>Confidence</Text>
             <Text style={styles.infoValue}>{Math.round(scanResult.confidence * 100)}%</Text>
+
+            <View style={styles.divider} />
+
+            <Text style={styles.infoLabel}>Gemini Tip</Text>
+            <Text style={styles.tipText}>{scanResult.recyclingTip}</Text>
           </View>
 
           {/* Action Buttons */}
@@ -138,8 +150,8 @@ export default function ScanResultScreen() {
             <Text style={styles.secondaryButtonText}>📖 How to Recycle</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.aiButton} onPress={handleAskAI}>
-            <Text style={styles.aiButtonText}>🤖 Ask AI for Tips</Text>
+          <TouchableOpacity style={styles.aiButton} onPress={handleScanAnother}>
+            <Text style={styles.aiButtonText}>📷 Scan Another Image</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.tertiaryButton} onPress={handleFindCenters}>
@@ -210,6 +222,19 @@ const styles = StyleSheet.create({
     fontSize: 80,
     marginBottom: 8,
   },
+  previewWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewEmoji: {
+    fontSize: 64,
+    marginBottom: 8,
+  },
+  previewLabel: {
+    fontSize: 12,
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
   itemName: {
     fontSize: 18,
     fontWeight: '600',
@@ -261,6 +286,11 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: 18,
     fontWeight: '600',
+    color: '#333',
+  },
+  tipText: {
+    fontSize: 15,
+    lineHeight: 22,
     color: '#333',
   },
   divider: {

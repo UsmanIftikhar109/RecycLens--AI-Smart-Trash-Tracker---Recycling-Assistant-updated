@@ -1,43 +1,70 @@
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { apiPost } from './utils/api';
 
 export default function ScanScreen() {
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
-  const [scannedItem, setScannedItem] = useState(null);
+  const [selectedImage, setSelectedImage] = useState(null);
 
-  // Sample items that can be "scanned"
-  const items = [
-    { id: 1, name: 'Plastic Bottle', material: 'Plastic', recyclable: true, icon: '🍾', confidence: 0.97 },
-    { id: 2, name: 'Glass Jar', material: 'Glass', recyclable: true, icon: '🏺', confidence: 0.98 },
-    { id: 3, name: 'Cardboard Box', material: 'Cardboard', recyclable: true, icon: '📦', confidence: 0.96 },
-    { id: 4, name: 'Aluminum Can', material: 'Metal', recyclable: true, icon: '🥫', confidence: 0.99 },
-    { id: 5, name: 'Styrofoam', material: 'Styrofoam', recyclable: false, icon: '⚪', confidence: 0.95 },
-    { id: 6, name: 'Paper', material: 'Paper', recyclable: true, icon: '📄', confidence: 0.94 },
-    { id: 7, name: 'Coffee Cup', material: 'Paper/Plastic', recyclable: false, icon: '☕', confidence: 0.92 },
-    { id: 8, name: 'Electronics', material: 'Electronics', recyclable: true, icon: '⚡', confidence: 0.88 },
-  ];
+  const analyzeImage = async (asset) => {
+    if (!asset.base64) {
+      Alert.alert('Image unavailable', 'Please choose a different image and try again.');
+      return;
+    }
 
-  const handleItemPress = async (item) => {
     setScanning(true);
-    setScannedItem(item);
+    setSelectedImage(asset.uri);
 
-    // Simulate scanning delay
-    setTimeout(() => {
-      setScanning(false);
-      // Navigate to scan result with item data
+    try {
+      const response = await apiPost('/api/scans/analyze-image', {
+        imageBase64: asset.base64,
+        mimeType: asset.mimeType || 'image/jpeg',
+      });
+
+      const analysis = response.analysis || {};
+
       router.push({
         pathname: '/scan-result',
         params: {
-          itemName: item.name,
-          material: item.material,
-          isRecyclable: item.recyclable.toString(),
-          confidence: item.confidence.toString(),
-          icon: item.icon,
+          itemName: analysis.itemName || 'Unknown item',
+          material: analysis.material || 'Mixed material',
+          isRecyclable: String(Boolean(analysis.isRecyclable)),
+          confidence: String(analysis.confidence ?? 0.5),
+          icon: analysis.icon || '♻️',
+          recyclingTip: analysis.recyclingTip || '',
+          summary: analysis.summary || '',
+          imageUri: asset.uri,
         },
       });
-    }, 1500);
+    } catch (error) {
+      Alert.alert('Scan failed', error.message || 'Unable to analyze image');
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handlePickImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission required', 'Allow photo access so RecycLens can scan your item image.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      base64: true,
+      allowsEditing: false,
+    });
+
+    if (result.canceled || !result.assets?.length) {
+      return;
+    }
+
+    await analyzeImage(result.assets[0]);
   };
 
   return (
@@ -45,43 +72,34 @@ export default function ScanScreen() {
       {scanning ? (
         <View style={styles.scanningContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />
-          <Text style={styles.scanningText}>Scanning: {scannedItem?.name}</Text>
-          <Text style={styles.scanningSubtext}>Analyzing material...</Text>
+          <Text style={styles.scanningText}>Scanning your image</Text>
+          <Text style={styles.scanningSubtext}>Gemini Flash is identifying the item and recycling tip...</Text>
         </View>
       ) : (
         <>
           <View style={styles.header}>
-            <Text style={styles.title}>Select Item to Scan</Text>
-            <Text style={styles.subtitle}>Tap an item to simulate scanning</Text>
+            <Text style={styles.title}>Scan an Item Image</Text>
+            <Text style={styles.subtitle}>Choose a photo and Gemini will identify how to recycle it</Text>
           </View>
 
-          <ScrollView style={styles.itemsGrid} showsVerticalScrollIndicator={false}>
-            <View style={styles.grid}>
-              {items.map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[
-                    styles.itemCard,
-                    item.recyclable ? styles.recyclable : styles.nonRecyclable,
-                  ]}
-                  onPress={() => handleItemPress(item)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.itemIcon}>{item.icon}</Text>
-                  <Text style={styles.itemName}>{item.name}</Text>
-                  <View style={styles.recycleIndicator}>
-                    <Text style={styles.recycleText}>
-                      {item.recyclable ? '♻️ Yes' : '✗ No'}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
+          <ScrollView style={styles.itemsGrid} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <TouchableOpacity style={styles.scanCard} onPress={handlePickImage} activeOpacity={0.8}>
+              <Text style={styles.itemIcon}>📷</Text>
+              <Text style={styles.itemName}>Choose Image</Text>
+              <Text style={styles.cardText}>Tap here to pick a trash item from your gallery.</Text>
+            </TouchableOpacity>
+
+            {selectedImage ? (
+              <View style={styles.previewCard}>
+                <Image source={{ uri: selectedImage }} style={styles.previewImage} />
+                <Text style={styles.previewLabel}>Selected image</Text>
+              </View>
+            ) : null}
           </ScrollView>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>This is a simulated scan.</Text>
-            <Text style={styles.footerText}>In production, this would use real camera + ML model.</Text>
+            <Text style={styles.footerText}>Gemini Flash analyzes the image and returns a recycling tip.</Text>
+            <Text style={styles.footerText}>No chatbot, only image-based scan results.</Text>
           </View>
         </>
       )}
@@ -117,31 +135,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 8,
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-  },
-  itemCard: {
-    width: '48%',
-    marginHorizontal: '1%',
-    marginVertical: 8,
-    borderRadius: 12,
-    padding: 16,
+  content: {
+    paddingVertical: 20,
+    paddingHorizontal: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 140,
-  },
-  recyclable: {
-    backgroundColor: '#e8f5e9',
-    borderWidth: 2,
-    borderColor: '#4CAF50',
-  },
-  nonRecyclable: {
-    backgroundColor: '#ffebee',
-    borderWidth: 2,
-    borderColor: '#f44336',
   },
   itemIcon: {
     fontSize: 48,
@@ -180,6 +177,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginTop: 8,
+  },
+  scanCard: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 180,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#4CAF50',
+  },
+  cardText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  previewCard: {
+    marginTop: 20,
+    width: '100%',
+    alignItems: 'center',
+  },
+  previewImage: {
+    width: '100%',
+    height: 220,
+    borderRadius: 18,
+    backgroundColor: '#fff',
+  },
+  previewLabel: {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#2E7D32',
+    fontWeight: '600',
   },
   footer: {
     padding: 16,

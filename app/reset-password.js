@@ -51,7 +51,7 @@ export default function ResetPasswordScreen() {
     try {
       const response = await apiPost('/api/auth/reset-password', {
         token: tokenInput.trim(),
-        password,
+        newPassword: password,
       });
 
       setIsError(false);

@@ -1,13 +1,33 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+
+const API_PORT = 5001;
+
+const normalizeBaseUrl = (value) => value.replace(/\/$/, '');
+
+const getCandidateBaseUrls = () => {
+  const configuredBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+  const candidates = [];
+
+  if (configuredBaseUrl) {
+    candidates.push(normalizeBaseUrl(configuredBaseUrl));
+  }
+
+  if (Platform.OS === 'android') {
+    candidates.push(`http://10.0.2.2:${API_PORT}`);
+  }
+
+  candidates.push(`http://localhost:${API_PORT}`);
+  candidates.push(`http://127.0.0.1:${API_PORT}`);
+
+  return [...new Set(candidates)];
+};
 
 /**
  * Get the base API URL for the backend
  */
 export const getApiBaseUrl = () => {
-  // In development, you can use your machine's IP address
-  // For production, replace with your actual backend URL
-  const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://192.168.18.61:5001';
-  return baseUrl;
+  return getCandidateBaseUrls()[0];
 };
 
 /**
@@ -51,36 +71,55 @@ export const removeToken = async () => {
  * @returns {Promise<object>} - Parsed JSON response
  */
 export const apiRequest = async (endpoint, options = {}) => {
-  const baseUrl = getApiBaseUrl();
-  const url = `${baseUrl}${endpoint}`;
-  
-  // Get token from storage
   const token = await getToken();
-  
-  // Set up headers
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {}),
   };
-  
-  // Attach JWT if available
+
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  
+
+  let lastError = null;
+
   try {
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
-    
-    const data = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(data.message || `API Error: ${response.status}`);
+    for (const baseUrl of getCandidateBaseUrls()) {
+      const url = `${baseUrl}${endpoint}`;
+
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers,
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        const data = contentType.includes('application/json')
+          ? await response.json()
+          : { message: await response.text() };
+
+        if (!response.ok) {
+          const errorMessage = data.error || data.message || `API Error: ${response.status}`;
+          throw new Error(errorMessage);
+        }
+
+        return data;
+      } catch (error) {
+        lastError = error;
+
+        const isNetworkError =
+          error instanceof TypeError ||
+          /Network request failed|fetch/i.test(error.message || '');
+
+        if (!isNetworkError) {
+          throw error;
+        }
+      }
     }
-    
-    return data;
+
+    throw new Error(
+      `Unable to reach the backend. Set EXPO_PUBLIC_API_BASE_URL to the correct server URL. Last error: ${lastError?.message || 'Unknown network error'}`
+    );
   } catch (error) {
     console.error(`API request failed: ${endpoint}`, error);
     throw error;

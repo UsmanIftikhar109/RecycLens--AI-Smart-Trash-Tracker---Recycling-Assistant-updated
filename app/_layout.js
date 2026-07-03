@@ -13,7 +13,6 @@ export default function RootLayout() {
           <Stack.Screen name="scan" />
           <Stack.Screen name="scan-result" />
           <Stack.Screen name="guide" />
-          <Stack.Screen name="ai-tips" />
           <Stack.Screen name="centers" />
           <Stack.Screen name="success" />
           <Stack.Screen name="history" />
